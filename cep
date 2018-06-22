@@ -7,7 +7,8 @@ from datetime import datetime
 from pathlib import Path
 
 def set_year(emission, reference):
-    emission = datetime.strptime(emission, '%d/%m')
+    # fake a leap year
+    emission = datetime.strptime(emission + '00', '%d/%m%y')
     if emission.month <= reference.month:
         emission = emission.replace(year=reference.year)
     else:
@@ -43,14 +44,18 @@ def main():
             ( 'DIRECTDEBIT', 'Prélèvements', True )
             ]
 
-    reg1 = r'^([\d/]{5})(.*)\s+([\d, ]+?)$'
+    reg1 = r'^(\d\d\/\d\d)(.*)\s+([\d, ]+?)$'
     reg2= r'^([\d, ]+?)(\d\d\/\d\d)(.*)$'
 
     # go through each file
     p = Path(sys.argv[1])
     for filename in p.iterdir():
+        filename = str(filename)
+        if filename.endswith('pdf') == False:
+            continue
+
         # escape spaces in name
-        filename = re.sub(r'\s', '\\ ', str(filename))
+        filename = re.sub(r'\s', '\\ ', filename)
 
         # parse pdf
         command = 'pdf2txt.py -M 200 -o tmp.txt ' + filename
@@ -68,7 +73,7 @@ def main():
         reference_emission = datetime.strptime(reference_emission, '%d/%m/%Y')
 
         # search for owner to identify multiple accounts
-        owner = re.findall(r'Identifiant client\n\n(\D*)', parsed)[0].strip()
+        owner = re.findall(r'Identifiant client\s+(\D*)', parsed)[0].strip()
         account_regex = r'^((?:MR|MME|MLLE) ' + owner + ' - .* - ([^(\n]*))$'
         accounts = re.findall(account_regex, parsed, flags=re.M)
 
@@ -103,6 +108,7 @@ def main():
                             account_number, 'OTHER', statement, amount, False)
 
         file_parsed.close()
+        print('Parsed: ' + filename)
 
     # move bank lines with REMISE as credit
     csv = re.sub(r'(.*BANK;\* REMISE.*;);([\d, ]+)', r'\1\2;', csv)
