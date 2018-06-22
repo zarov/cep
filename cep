@@ -1,0 +1,119 @@
+#!/usr/bin/env python3
+# -*- encoding: utf-8 -*-
+import sys
+import os
+import re
+from datetime import datetime
+from pathlib import Path
+
+def set_year(emission, reference):
+    emission = datetime.strptime(emission, '%d/%m')
+    if emission.month <= reference.month:
+        emission = emission.replace(year=reference.year)
+    else:
+        emission = emission.replace(year=reference.year-1)
+    return datetime.strftime(emission, '%d/%m/%Y')
+
+def set_amount(amount, debit):
+    if debit:
+        return ';' + amount
+    return amount + ';'
+
+def set_entry(emission, reference_emission, account_number, index, statement,
+        amount, debit):
+    res = set_year(emission, reference_emission) + ';'
+    res += account_number + ';'
+    res += index + ';'
+    res += statement.strip() + ';'
+    res += set_amount(amount, debit)
+    res += '\n'
+    return res
+
+def main():
+    csv = 'date;account;type;statement;credit;debit\n'
+
+    # sections
+    sections = [
+            ( 'DEPOT', 'Opérations de dépôt', False ),
+            ( 'TRANSFERT', 'Virements reçus', False ),
+            ( 'CHECK', 'Paiements chèques', True ),
+            ( 'BANK', 'Frais bancaires et cotisations', True ),
+            ( 'DEBIT', 'Paiements carte bancaire', True ),
+            ( 'WITHDRAWAL', 'Retraits carte bancaire', True ),
+            ( 'DIRECTDEBIT', 'Prélèvements', True )
+            ]
+
+    reg1 = r'^([\d/]{5})(.*)\s+([\d, ]+?)$'
+    reg2= r'^([\d, ]+?)(\d\d\/\d\d)(.*)$'
+
+    # go through each file
+    p = Path(sys.argv[1])
+    for filename in p.iterdir():
+        # escape spaces in name
+        filename = re.sub(r'\s', '\\ ', str(filename))
+
+        # parse pdf
+        command = 'pdf2txt.py -M 200 -o tmp.txt ' + filename
+        os.system(command)
+
+        # open parsed
+        file_parsed = open('tmp.txt', 'r')
+        parsed = file_parsed.read()
+
+        # remove lines with one character or less
+        parsed = re.sub(r'\n.$', '', parsed, flags=re.M)
+
+        # search for date of emission of the pdf
+        reference_emission = re.findall(r'\b([\d/]{10})\b', parsed)[0]
+        reference_emission = datetime.strptime(reference_emission, '%d/%m/%Y')
+
+        # search for owner to identify multiple accounts
+        owner = re.findall(r'Identifiant client\n\n(\D*)', parsed)[0].strip()
+        account_regex = r'^((?:MR|MME|MLLE) ' + owner + ' - .* - ([^(\n]*))$'
+        accounts = re.findall(account_regex, parsed, flags=re.M)
+
+        for (full, account_number) in reversed(accounts):
+            (parsed, _, account) = parsed.partition(full)
+            account_number = re.sub(r'\D', '', account_number)
+            account_copy = account
+
+            # isolate and parse each section
+            no_section = True
+            for (index, section, debit) in reversed(sections):
+                (account, _, result) = account.partition(section)
+
+                res = re.findall(reg1, result, flags=re.M)
+                for (emission, statement, amount) in res:
+                    no_section = False
+                    csv += set_entry(emission, reference_emission,
+                            account_number, index, statement, amount, debit)
+
+            # nothing has been found above: test others things
+            if no_section:
+                # this should always be credit
+                res = re.findall(reg1, account_copy, flags=re.M)
+                for (emission, statement, amount) in res:
+                    csv += set_entry(emission, reference_emission,
+                            account_number, 'OTHER', statement, amount, True)
+
+                # and this one debit
+                res = re.findall(reg2, account_copy, flags=re.M)
+                for (amount, emission, statement) in res:
+                    csv += set_entry(emission, reference_emission,
+                            account_number, 'OTHER', statement, amount, False)
+
+        file_parsed.close()
+
+    # move bank lines with REMISE as credit
+    csv = re.sub(r'(.*BANK;\* REMISE.*;);([\d, ]+)', r'\1\2;', csv)
+
+    # write result in file
+    file_result = open('./compte.csv', 'w')
+    file_result.write(csv)
+    file_result.close()
+
+    # rm tmp file
+    os.remove('tmp.txt')
+
+if __name__ == "__main__":
+    main()
