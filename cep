@@ -113,6 +113,9 @@ def main():
     # move bank lines with REMISE as credit
     csv = re.sub(r'(.*BANK;\* REMISE.*;);([\d, ]+)', r'\1\2;', csv)
 
+    # remove not useful information for debit
+    csv = re.sub(r'(.*)CB (.*\w) +FACT \d{6}(.*)', r'\1\2\3', csv)
+
     # write result in file
     file_result = open('./compte.csv', 'w')
     file_result.write(csv)
