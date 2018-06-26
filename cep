@@ -66,7 +66,7 @@ def main():
         parsed = file_parsed.read()
 
         # remove lines with one character or less
-        parsed = re.sub(r'\n.$', '', parsed, flags=re.M)
+        parsed = re.sub(r'(\n.| +)$', '', parsed, flags=re.M)
 
         # search for date of emission of the pdf
         reference_emission = re.findall(r'\b([\d/]{10})\b', parsed)[0]
